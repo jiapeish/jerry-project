@@ -21,9 +21,9 @@ go test .
 
 ## 代码结构
 
-segment.go 3个对外提供的方法
-type.go 数据结构定义
-utils.go 内部使用的方法
+- segment.go 3个对外提供的方法 
+- type.go 数据结构定义 
+- utils.go 内部使用的方法
 
 
 ## 下一步优化的地方
