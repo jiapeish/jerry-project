@@ -14,6 +14,26 @@ go build -o jerry-project .
 ./jerry-project
 ```
 
+3. 运行测试
+```shell
+go test .
+```
+
+## 代码结构
+
+segment.go 3个对外提供的方法
+type.go 数据结构定义
+utils.go 内部使用的方法
+
+
+## 下一步优化的地方
+1. 不支持并发调用，后续可以考虑加锁；
+2. 支持更多数据类型
+3. 
+
+
+
+
 ## Intensity Segments
 
 ### Guidelines
