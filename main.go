@@ -2,188 +2,168 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
-const (
-	Add = iota
-	Set
-)
-
-type Segment struct {
-	Left      int
-	Right     int
-	Intensity int
-}
-
 type IntensitySegments struct {
-	segments []Segment
+	diff map[int]int // k->v: 从区间跳变点到Intensity的delta的映射，这里v是Intensity的变化量delta，作用于[k, +Inf)
+	keys []int       // 排好序的区间跳变点
 }
 
 func NewIntensitySegments() *IntensitySegments {
 	return &IntensitySegments{
-		segments: make([]Segment, 0),
+		diff: make(map[int]int),
+		keys: make([]int, 0),
 	}
 }
 
 func (is *IntensitySegments) Add(from, to, amount int) {
-	is.update(from, to, amount, Add)
+	if amount == 0 || from >= to {
+		return
+	}
+	is.putDelta(from, amount)
+	is.putDelta(to, -amount)
 }
 
+// Set 方法把[from, to)的Intensity设置为amount
+// 步骤:
+//  1. 计算起始点from的调整量: amount - Intensity(from).
+//  2. 清除区间(from, to)内的断点并记录其总影响：Set方法会设置[from, to)区间内的Intensity为amount，
+//     而区间内的原有跳变点会导致Intensity变化，因此必须删除这些跳变点, 但这些跳变点又会影响to右侧的Intensity
+//     直接删除会改变to右侧的Intensity，因此用internal记录这些点的delta和，然后在to处施加这个影响，保证to右侧Intensity不变
+//  3. 在from处 +delta，并在to处 -delta+internal
 func (is *IntensitySegments) Set(from, to, amount int) {
-	is.update(from, to, amount, Set)
+	if from >= to {
+		return
+	}
+	// Step 1: 计算from处当前的intensity值，从而计算需要调整的量，让from处的强度变为amount
+	currentFrom := is.intensityAt(from)
+	deltaFrom := amount - currentFrom
+
+	// Step 2: 清除区间内原有的跳变点，但是intensity要记录下来
+	left := upperBound(is.keys, from)
+	right := lowerBound(is.keys, to)
+	internal := 0
+	for i := left; i < right; i++ {
+		k := is.keys[i]
+		internal += is.diff[k]
+		delete(is.diff, k)
+	}
+	// 删除这些跳变点，重合了，没有用了
+	is.keys = dropout(is.keys, left, right)
+
+	// Step 3: 调整from和to处的intensity
+	is.putDelta(from, deltaFrom)
+	is.putDelta(to, internal-deltaFrom)
 }
 
-func (is *IntensitySegments) update(from, to, amount int, operation int) {
-	updated := make([]Segment, 0)
-	n := len(is.segments)
-	handledCount := 0
+// ToString 打印
+func (is *IntensitySegments) ToString() string {
+	if len(is.keys) == 0 {
+		return "[]"
+	}
+	var b strings.Builder
+	b.WriteByte('[')
+	sum := 0
+	for i, k := range is.keys {
+		sum += is.diff[k]
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, "[%d,%d]", k, sum)
+	}
+	b.WriteByte(']')
+	return b.String()
+}
 
-	if n == 0 {
-		updated = append(updated, Segment{
-			Left:      from,
-			Right:     to,
-			Intensity: amount,
-		})
-		is.segments = is.merge(updated)
+// intensityAt 返回x处的intensity (其左侧的delta会对其有影响).
+func (is *IntensitySegments) intensityAt(x int) int {
+	sum := 0
+	for _, k := range is.keys {
+		// 遇到大于 x 的断点，就停止遍历，因为右侧的点对其intensity没有影响哈
+		if k > x {
+			break
+		}
+		sum += is.diff[k]
+	}
+	return sum
+}
+
+// putDelta 修改k的intensity
+func (is *IntensitySegments) putDelta(k, delta int) {
+	if delta == 0 {
 		return
 	}
 
-	// 1. 当前扫描到的区间[left, right]在新变更的区间[from, to]左侧
-	// left                      right         from                       to
-	// ───────────────────────────────         ─────────────────────────────
-	for i := 0; i < n && is.segments[i].Right <= from; i++ {
-		updated = append(updated, is.segments[i])
-		handledCount++
-	}
-
-	// 2. 当前扫描到的区间[left, right]与新变更的区间[from, to]有重叠
-	//          from                       to
-	//          ─────────────────────────────
-	// left                                          right
-	// ───────────────────────────────────────────────────
-	for i := handledCount; i < n && is.segments[i].Left < to; i++ {
-		current := is.segments[i]
-
-		// 2.1 计算左边没重叠的部分
-		//                from                       to
-		//                ─────────────────────────────
-		// left                      right
-		// ───────────────────────────────
-		if current.Left < from {
-			updated = append(updated, Segment{
-				Left:      current.Left,
-				Right:     from,
-				Intensity: current.Intensity,
-			})
-		}
-
-		// 2.2 计算两个区间的重叠部分
-		// from                       to
-		// ─────────────────────────────
-		//     left          right
-		//     ───────────────────
-		commonLeft := max(current.Left, from)
-		commonRight := min(current.Right, to)
-		intensity := 0
-		if operation == Add {
-			intensity = current.Intensity + amount
-		} else if operation == Set {
-			intensity = amount
-		}
-		updated = append(updated, Segment{
-			Left:      commonLeft,
-			Right:     commonRight,
-			Intensity: intensity,
-		})
-
-		// 2.3 计算右边没重叠的部分
-		// from                       to
-		// ─────────────────────────────
-		//           left                      right
-		//           ───────────────────────────────
-		if to < current.Right {
-			updated = append(updated, Segment{
-				Left:      to,
-				Right:     current.Right,
-				Intensity: current.Intensity,
-			})
-		}
-		handledCount++
-	}
-
-	// 3. 当前扫描到的区间[left, right]在新变更的区间[from, to]右侧
-	// from                       to     left                      right
-	// ─────────────────────────────     ───────────────────────────────
-	for i := handledCount; i < n; i++ {
-		updated = append(updated, is.segments[i])
-	}
-
-	is.segments = is.merge(updated)
-}
-
-func (is *IntensitySegments) merge(segments []Segment) []Segment {
-	if len(segments) <= 1 {
-		return segments
-	}
-
-	merged := make([]Segment, 0)
-	merged = append(merged, segments[0])
-
-	for i := 1; i < len(segments); i++ {
-		current := segments[i]
-		lastIdx := len(merged) - 1
-		last := merged[lastIdx]
-		//          last
-		// ─────────────────────────
-		//                                 current
-		//                          ───────────────────────
-		if last.Right == current.Left && last.Intensity == current.Intensity {
-			merged[lastIdx] = Segment{
-				Left:      last.Left,
-				Right:     current.Right,
-				Intensity: last.Intensity,
+	// 如果跳变点k已经存在
+	if v, ok := is.diff[k]; ok {
+		v += delta
+		if v == 0 {
+			// 累加后delta变为0，没有用了，需要删除
+			delete(is.diff, k)
+			idx := lowerBound(is.keys, k)
+			if idx < len(is.keys) && is.keys[idx] == k {
+				is.keys = append(is.keys[:idx], is.keys[idx+1:]...)
 			}
-		} else {
-			merged = append(merged, current)
+			return
 		}
+		is.diff[k] = v
+		return
 	}
 
-	return merged
+	// 新的跳变点
+	is.diff[k] = delta
+	idx := lowerBound(is.keys, k)
+	// 根据位置插入k到数组keys
+	if idx == len(is.keys) {
+		is.keys = append(is.keys, k)
+	} else if is.keys[idx] != k {
+		is.keys = append(is.keys, 0)
+		copy(is.keys[idx+1:], is.keys[idx:])
+		is.keys[idx] = k
+	}
 }
 
-func (is *IntensitySegments) ToString() string {
-	if len(is.segments) == 0 {
-		return "[]"
+func lowerBound(a []int, x int) int {
+	return sort.Search(len(a), func(i int) bool { return a[i] >= x })
+}
+
+func upperBound(a []int, x int) int {
+	return sort.Search(len(a), func(i int) bool { return a[i] > x })
+}
+
+// 丢弃数组中的区间[l, r]
+func dropout(a []int, l, r int) []int {
+	if l >= r {
+		return a
 	}
-	parts := make([]string, len(is.segments))
-	for i, seg := range is.segments {
-		parts[i] = fmt.Sprintf("[%d,%d]", seg.Left, seg.Intensity)
-	}
-	return "[" + strings.Join(parts, ",") + "]"
+	out := make([]int, 0, len(a)-(r-l))
+	out = append(out, a[:l]...)
+	out = append(out, a[r:]...)
+	return out
 }
 
 func main() {
+	// 例子1:
 	segments := NewIntensitySegments()
+	fmt.Println(segments.ToString()) // "[]"
 	segments.Add(10, 30, 1)
-	fmt.Println(segments.ToString()) // 输出 [[10,1],[30,0]]
-
+	fmt.Println(segments.ToString()) // [[10,1],[30,0]]
 	segments.Add(20, 40, 1)
-	fmt.Println(segments.ToString()) // 输出 [[10,1],[20,2],[30,1],[40,0]]
+	fmt.Println(segments.ToString()) // [[10,1],[20,2],[30,1],[40,0]]
+	segments.Add(10, 40, -2)
+	fmt.Println(segments.ToString()) // [[10,-1],[20,0],[30,-1],[40,0]]
 
-	segments.Set(10, 40, -2)
-	fmt.Println(segments.ToString()) // 输出 [[10,-1],[20,0],[30,-1],[40,0]]
-
+	// 例子2:
 	segments2 := NewIntensitySegments()
+	fmt.Println(segments2.ToString()) // "[]"
 	segments2.Add(10, 30, 1)
-	fmt.Println(segments2.ToString()) // 输出 [[10,1],[30,0]]
-
+	fmt.Println(segments2.ToString()) // [[10,1],[30,0]]
 	segments2.Add(20, 40, 1)
-	fmt.Println(segments2.ToString()) // 输出 [[10,1],[20,2],[30,1],[40,0]]
-
-	segments2.Set(10, 40, -1)
-	fmt.Println(segments2.ToString()) // 输出 [[20,1],[30,0]]
-
-	segments2.Set(10, 40, -1)
-	fmt.Println(segments2.ToString()) // 输出 [[10,-1],[20,0],[30,-1],[40,0]]
+	fmt.Println(segments2.ToString()) // [[10,1],[20,2],[30,1],[40,0]]
+	segments2.Add(10, 40, -1)
+	fmt.Println(segments2.ToString()) // [[20,1],[30,0]]
+	segments2.Add(10, 40, -1)
+	fmt.Println(segments2.ToString()) // [[10,-1],[20,0],[30,-1],[40,0]]
 }
