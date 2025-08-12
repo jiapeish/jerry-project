@@ -1,5 +1,18 @@
 # jerry-project
 
+## 怎么运行？
+
+1. 直接运行
+```shell
+go run .
+```
+
+2. 先构建再运行
+```shell
+go build -o jerry-project .
+
+./jerry-project
+```
 
 ## Intensity Segments
 
