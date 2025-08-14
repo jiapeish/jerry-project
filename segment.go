@@ -1,16 +1,13 @@
 package main
 
-import (
-	"fmt"
-	"strings"
-)
-
 func (is *IntensitySegments) Add(from, to, amount int) {
 	if amount == 0 || from >= to {
 		return
 	}
 	is.putDelta(from, amount)
 	is.putDelta(to, -amount)
+	
+	is.update()
 }
 
 // Set 方法把[from, to)的Intensity设置为amount
@@ -43,23 +40,11 @@ func (is *IntensitySegments) Set(from, to, amount int) {
 	// Step 3: 调整from和to处的intensity
 	is.putDelta(from, deltaFrom)
 	is.putDelta(to, internal-deltaFrom)
+
+	is.update()
 }
 
 // ToString 打印
 func (is *IntensitySegments) ToString() string {
-	if len(is.keys) == 0 {
-		return "[]"
-	}
-	var b strings.Builder
-	b.WriteByte('[')
-	sum := 0
-	for i, k := range is.keys {
-		sum += is.diff[k]
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		fmt.Fprintf(&b, "[%d,%d]", k, sum)
-	}
-	b.WriteByte(']')
-	return b.String()
+	return is.cache
 }

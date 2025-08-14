@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 )
 
 // intensityAt 返回x处的intensity (其左侧的delta会对其有影响).
@@ -50,6 +52,26 @@ func (is *IntensitySegments) putDelta(k, delta int) {
 		copy(is.keys[idx+1:], is.keys[idx:])
 		is.keys[idx] = k
 	}
+}
+
+func (is *IntensitySegments) update() {
+	if len(is.keys) == 0 {
+		is.cache = "[]"
+		return
+	}
+
+	var b strings.Builder
+	b.WriteByte('[')
+	sum := 0
+	for i, k := range is.keys {
+		sum += is.diff[k]
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, "[%d,%d]", k, sum)
+	}
+	b.WriteByte(']')
+	is.cache = b.String()
 }
 
 func lowerBound(a []int, x int) int {
